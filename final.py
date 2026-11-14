@@ -8,16 +8,23 @@ def detect_dayfirst(df, date_column="time"):
     first_parts = df[date_column].str.split("-").str[0].astype(int)
     return (first_parts > 12).any()
 
-def YearAverage(item):
+def YearAverage(item,info):
+    variable,location,unit=info
     df=pd.read_csv(item)
     df["date"] = pd.to_datetime(df["time"])
     df["date"] = pd.to_datetime(df["time"], dayfirst=True)
+    df["mean"] = df["mean"].replace(-9999, np.nan)
+    df = df.set_index("date")
+    df["mean"] = df["mean"].interpolate(method="time", limit=2)
+    df = df.dropna(subset=["mean"])
+    df = df.reset_index()
     df["year"] = df["date"].dt.year
     yearly_avg = df.groupby("year")["mean"].mean().reset_index()
     plt.plot(yearly_avg["year"], yearly_avg["mean"], marker="o")
     plt.xlabel("Year")
-    plt.ylabel("Average Temperature (K)")
-    plt.title("Yearly Average Temperature")
+    plt.ylabel(f"yearly average value of {variable} ({unit})")
+    plt.xticks(range(2006,2027))
+    plt.title(f"Variation in Yearly Average value of {variable} ({unit}) : {location}")
     plt.show()
 
 def DeseasonalizedData(item,limit=2):
@@ -56,7 +63,6 @@ def Plot(df,info):
     plt.title(f"{variable}: {location}")
     plt.grid(True, alpha=0.3)
     plt.tight_layout()
-    plt.show()
     x = df["date"]
     y = df["anomaly"]
     plt.plot(x,y)
@@ -68,6 +74,15 @@ for item in directory.iterdir():
         continue
     variablename=item.name.split('_')
     variablename.append('2')
+    variablename[1]=variablename[1][:-4]
+    df=YearAverage(item,variablename)
+
+for item in directory.iterdir():
+    if item.suffix.lower() != ".csv":
+        continue
+    variablename=item.name.split('_')
+    variablename.append('2')
     df=DeseasonalizedData(item)
     Plot(df,variablename)
     Analysis(df)
+
