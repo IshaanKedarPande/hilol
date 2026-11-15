@@ -12,8 +12,9 @@ A static website (plain HTML, CSS and JavaScript, no framework and no build step
 | `build_site_data.py` | **New.** Runs `final.DeseasonalizedData()` and the same `linregress` as `final.Analysis()` on every CSV, then writes `data/results.json`. |
 | `data/results.json` | Generated output: series, anomalies, trend line, slope, p-value, R², 95% CI and missing-data counts. |
 | `data/content.json` | Website text: variable definitions and place descriptions from *Variables explanation.rtf*, and the chart notes from *Analysis of trends.rtf*. |
-| `index.html` | Landing page: the question, method, three demo case files, glossary, and what the results can and cannot tell us. |
-| `explore.html` + `assets/explore.js` | The explorer. Three guided questions (topic → variable → place), then the chart, verdict, plain-language summary and comparison table. |
+| `index.html` + `assets/home.js` | Landing page: a step-by-step method demo on any record, a filterable grid of all records, three starting points, method, glossary and limits. |
+| `explore.html` + `assets/explore.js` | The explorer. Pick topic → variable → place, then the chart, verdict, summary and comparison table (tick places to overlay them). |
+| `assets/chart.js` | The interactive chart: drag-a-box zoom, pan, overview strip, keyboard controls, hide/show lines, CSV download of the visible months. |
 | `assets/style.css`, `assets/common.js` | Shared styles and helpers. |
 | `vercel.json` | Vercel settings (clean URLs, caching). |
 
