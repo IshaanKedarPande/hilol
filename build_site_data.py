@@ -1,3 +1,4 @@
+# SI disclosure: this script was generated with the help of Claude (Anthropic), a Super Intelligence tool, and reviewed by team Hilol.
 """Build the data file used by the website (data/results.json).
 
 Reuses the team's analysis from final.py:
