@@ -1,12 +1,13 @@
-/* Trend Explorer: guided selection + chart + verdict, driven by data/results.json and data/content.json. */
+/* Trend Explorer: pick a record, then chart + verdict, driven by data/results.json and data/content.json. */
 (function () {
   const $ = (s, el = document) => el.querySelector(s);
   const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
   const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
   const fmtMonth = ym => { const [y, m] = ym.split('-'); return `${MONTHS[+m - 1]} ${y}`; };
+  const COLORS = { data: '#2a6fcf', trend: '#d4521c', overlay: ['#8a4fbf', '#13806b', '#b03a73'] };
 
-  const state = { cat: null, variable: null, series: null, view: 'anomaly' };
-  let DATA, CONTENT, BY_ID;
+  const state = { cat: null, variable: null, series: null, view: 'anomaly', overlays: [] };
+  let DATA, CONTENT, BY_ID, chart;
 
   const ICON_CHECK = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="8" fill="currentColor"/><path d="M4.5 8.2 7 10.6l4.6-5" stroke="#fff" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   const ICON_DASH = '<svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="7" fill="none" stroke="currentColor" stroke-width="2"/><path d="M5 8h6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>';
@@ -26,9 +27,14 @@
   }
   function seriesForVar(v) { return DATA.filter(r => r.variable === v); }
   function placeOf(id) { return CONTENT.locations[id]?.place || BY_ID[id].location; }
+  function overlayColor(primaryId, id) {
+    const others = seriesForVar(BY_ID[primaryId].variable).filter(o => o.id !== primaryId);
+    return COLORS.overlay[Math.max(0, others.findIndex(o => o.id === id)) % COLORS.overlay.length];
+  }
 
   function select(seriesId, push = true) {
     const r = BY_ID[seriesId];
+    state.overlays = state.variable === r.variable ? state.overlays.filter(x => x !== seriesId) : [];
     state.series = seriesId;
     state.variable = r.variable;
     state.cat = CONTENT.variables[r.variable].category;
@@ -51,7 +57,7 @@
     CONTENT.categories.forEach(c => cats.appendChild(chip(c.label, c.id === state.cat, () => {
       const v = varsInCat(c.id)[0];
       select(seriesForVar(v)[0].id);
-    }, '')));
+    })));
     const cq = CONTENT.categories.find(c => c.id === state.cat);
     cats.title = cq ? cq.question : '';
 
@@ -68,11 +74,11 @@
     const total = r.slope_per_year * years;
     const ciIncludesZero = r.ci95_per_year[0] <= 0 && r.ci95_per_year[1] >= 0;
     const dir = TD.direction(r);
-    let s = `<p>From ${fmtMonth(r.start)} to ${fmtMonth(r.end)}, once the seasonal cycle is removed, the best-fit line for <strong>${esc(v.short.toLowerCase())}</strong> at <strong>${esc(placeOf(r.id))}</strong> changes by <strong>${TD.fmtRate(r.slope_per_year, esc(v.unit))}</strong>. Over the ${years.toFixed(0)}-year record that adds up to about <strong>${TD.fmtNum(total, 2, true)} ${esc(v.unit)}</strong>.</p>`;
+    let s = `<p>From ${fmtMonth(r.start)} to ${fmtMonth(r.end)}, with the seasons taken out, the fitted line for <strong>${esc(v.short.toLowerCase())}</strong> at <strong>${esc(placeOf(r.id))}</strong> changes by <strong>${TD.fmtRate(r.slope_per_year, esc(v.unit))}</strong>. Over the ${years.toFixed(0)}-year record that adds up to about <strong>${TD.fmtNum(total, 2, true)} ${esc(v.unit)}</strong>.</p>`;
     if (r.significant) {
-      s += `<p>The p-value is ${TD.fmtP(r.p_value)}, below 0.05, so this <strong>${esc(dir)} trend is statistically significant</strong>: random month-to-month noise alone would be unlikely to produce a slope this steep. The 95% confidence interval (${TD.fmtNum(r.ci95_per_year[0], 2, true)} to ${TD.fmtNum(r.ci95_per_year[1], 2, true)} ${esc(v.unit)}/year) ${ciIncludesZero ? 'still touches zero, so treat the direction with caution' : 'does not include zero, so the direction of change is clear'}.</p>`;
+      s += `<p>The p-value is ${TD.fmtP(r.p_value)}, below 0.05, so this <strong>${esc(dir)} trend is statistically significant</strong>: random month-to-month noise alone would be unlikely to give a slope this steep. The 95% confidence interval (${TD.fmtNum(r.ci95_per_year[0], 2, true)} to ${TD.fmtNum(r.ci95_per_year[1], 2, true)} ${esc(v.unit)}/year) ${ciIncludesZero ? 'still touches zero, so treat the direction with caution' : 'does not include zero, so the direction of change is clear'}.</p>`;
     } else {
-      s += `<p>The p-value is ${TD.fmtP(r.p_value)}, above 0.05, so the trend is <strong>not statistically significant</strong>. The line leans slightly ${r.slope_per_year > 0 ? 'upward' : 'downward'}, but a slope this size could easily come from natural variability. The 95% confidence interval (${TD.fmtNum(r.ci95_per_year[0], 2, true)} to ${TD.fmtNum(r.ci95_per_year[1], 2, true)} ${esc(v.unit)}/year) includes zero. This does not prove nothing is changing; a longer record might reveal a trend.</p>`;
+      s += `<p>The p-value is ${TD.fmtP(r.p_value)}, above 0.05, so the trend is <strong>not statistically significant</strong>. The line leans slightly ${r.slope_per_year > 0 ? 'upward' : 'downward'}, but a slope this size could easily come from natural variability. The 95% confidence interval (${TD.fmtNum(r.ci95_per_year[0], 2, true)} to ${TD.fmtNum(r.ci95_per_year[1], 2, true)} ${esc(v.unit)}/year) includes zero. That doesn't prove nothing is changing; a longer record might show a trend.</p>`;
     }
     if (r.n_missing_fill / r.n_rows_in_file > 0.05) {
       const mbm = r.missing_by_calendar_month || {};
@@ -96,12 +102,21 @@
       ? `<span class="badge sig">${ICON_CHECK} Significant trend</span>`
       : `<span class="badge notsig">${ICON_DASH} No significant trend</span>`;
 
-    const compareRows = seriesForVar(r.variable).map(o => `
-      <tr class="${o.id === r.id ? 'current' : ''}">
-        <td>${o.id === r.id ? `<strong>${esc(placeOf(o.id))}</strong>` : `<button type="button" data-go="${esc(o.id)}">${esc(placeOf(o.id))}</button>`}</td>
+    const compareRows = seriesForVar(r.variable).map(o => {
+      const isCur = o.id === r.id;
+      const col = isCur ? COLORS.data : overlayColor(r.id, o.id);
+      const on = isCur || state.overlays.includes(o.id);
+      return `
+      <tr class="${isCur ? 'current' : ''}">
+        <td><span class="ov">${isCur
+          ? `<span class="swatch" style="background:${col}" title="On the chart"></span>`
+          : `<input type="checkbox" data-overlay="${esc(o.id)}" ${on ? 'checked' : ''} style="accent-color:${col}" aria-label="Draw ${esc(placeOf(o.id))} on the chart">`}</span>${isCur
+          ? `<strong>${esc(placeOf(o.id))}</strong>`
+          : `<button type="button" data-go="${esc(o.id)}">${esc(placeOf(o.id))}</button>`}</td>
         <td>${TD.fmtNum(o.slope_per_year, 3, true)}</td>
         <td>${o.significant ? '<strong>Yes</strong>, ' + esc(TD.direction(o)) : 'No'}<br><span class="muted" style="font-size:.8rem">p ${o.p_value < 0.0001 ? '&lt; 0.0001' : '= ' + o.p_value.toFixed(4)}</span></td>
-      </tr>`).join('');
+      </tr>`;
+    }).join('');
 
     $('#app').innerHTML = `
       <div class="result-grid">
@@ -122,29 +137,28 @@
 
           <div class="toolbar">
             <div class="seg" role="group" aria-label="Chart view">
-              <button type="button" data-view="anomaly" aria-pressed="${state.view === 'anomaly'}">Trend view</button>
+              <button type="button" data-view="anomaly" aria-pressed="${state.view === 'anomaly'}">Seasons removed</button>
               <button type="button" data-view="value" aria-pressed="${state.view === 'value'}">Raw monthly values</button>
             </div>
-            <div class="legend" id="legend"></div>
           </div>
-          <div class="chart-box" id="chart"></div>
+          <div id="chart"></div>
           <p class="chart-caption" id="chart-caption"></p>
 
           <div class="plain">
-            <h3>What this means in plain language</h3>
+            <h3>In short</h3>
             ${plainSummary(r, v)}
           </div>
 
           ${notes ? `
-          <h3 style="margin-top:24px">What the chart shows: the team's visual reading</h3>
-          <p class="muted" style="font-size:.9rem">Observations from looking at the seasons-removed chart. A gentle trend can be statistically significant even when it is hard to see by eye under large month-to-month swings.</p>
+          <h3 style="margin-top:24px">What we noticed looking at the chart</h3>
+          <p class="muted" style="font-size:.9rem">These are our notes from reading the seasons-removed chart by eye. A gentle trend can be statistically significant even when it's hard to see under big month-to-month swings.</p>
           <dl class="notes">
             <dt>Overview</dt><dd>${esc(notes.overview)}</dd>
             <dt>Pattern over time</dt><dd>${esc(notes.pattern)}</dd>
             <dt>Extremes (${esc(v.unit)}, relative to normal)</dt><dd>${esc(notes.extremes)}</dd>
           </dl>` : `
-          <h3 style="margin-top:24px">What the chart shows</h3>
-          <p class="muted"><em>[Placeholder] No written visual analysis has been provided for this location yet.</em></p>`}
+          <h3 style="margin-top:24px">What we noticed looking at the chart</h3>
+          <p class="muted"><em>[Placeholder] No written notes for this location yet.</em></p>`}
 
           <details class="data-table">
             <summary>Show the data as a table (${r.n_months} months)</summary>
@@ -175,10 +189,10 @@
           <div class="panel">
             <p class="eyebrow">Compare places</p>
             <h3>${esc(v.short)}: every location</h3>
-            <p style="font-size:.88rem">The same variable can trend in different directions in different regions. Rates are in ${esc(v.unit)} per year.</p>
+            <p style="font-size:.88rem">The same variable can trend in different directions in different places. Tick a box to draw that place on the chart as well. Rates are in ${esc(v.unit)} per year.</p>
             <div class="table-scroll">
               <table class="compare">
-                <thead><tr><th scope="col">Place</th><th scope="col">Rate per year</th><th scope="col">Verdict</th></tr></thead>
+                <thead><tr><th scope="col">Place</th><th scope="col">Rate per year</th><th scope="col">Significant?</th></tr></thead>
                 <tbody>${compareRows}</tbody>
               </table>
             </div>
@@ -187,129 +201,54 @@
       </div>`;
 
     $('#app').querySelectorAll('[data-go]').forEach(b => b.addEventListener('click', () => select(b.dataset.go)));
+    $('#app').querySelectorAll('[data-overlay]').forEach(cb => cb.addEventListener('change', () => {
+      const id = cb.dataset.overlay;
+      state.overlays = state.overlays.filter(x => x !== id);
+      if (cb.checked) state.overlays.push(id);
+      drawChart(r, v, true);
+    }));
     $('#app').querySelectorAll('[data-view]').forEach(b => b.addEventListener('click', () => {
       state.view = b.dataset.view;
       $('#app').querySelectorAll('[data-view]').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
-      drawChart(r, v);
+      drawChart(r, v, true);
     }));
-    drawChart(r, v);
+    chart = TDChart($('#chart'), { height: 360 });
+    drawChart(r, v, false);
   }
 
-  /* ---------------- Chart (plain SVG, no library) ---------------- */
-  function niceTicks(min, max, count = 5) {
-    const span = max - min || Math.abs(max) || 1;
-    const raw = span / count;
-    const mag = Math.pow(10, Math.floor(Math.log10(raw)));
-    const step = [1, 2, 2.5, 5, 10].map(m => m * mag).find(s => span / s <= count) || 10 * mag;
-    const lo = Math.floor(min / step) * step, hi = Math.ceil(max / step) * step;
-    const ticks = []; for (let t = lo; t <= hi + step / 2; t += step) ticks.push(+t.toPrecision(12));
-    return ticks;
-  }
-  const monthIndex = ym => { const [y, m] = ym.split('-').map(Number); return y * 12 + (m - 1); };
-
-  function drawChart(r, v) {
-    const box = $('#chart');
-    // Draw at the container's real pixel width so text stays readable on phones.
-    const W = Math.max(300, Math.round(box.clientWidth || 760));
-    const narrow = W < 500;
-    const H = narrow ? 280 : 340, M = { t: 16, r: narrow ? 10 : 18, b: 34, l: narrow ? 62 : 74 };
+  /* ---------------- Chart data (drawing and zoom live in assets/chart.js) ---------------- */
+  function drawChart(r, v, keepView) {
     const isAnom = state.view === 'anomaly';
-    const ys = isAnom ? r.series.anomaly : r.series.value;
-    const xs = r.series.date.map(monthIndex);
-    const x0 = xs[0], x1 = xs[xs.length - 1];
-    let lo = Math.min(...ys), hi = Math.max(...ys);
-    if (isAnom) { const a = Math.max(Math.abs(lo), Math.abs(hi)); lo = -a; hi = a; }
-    const yt = niceTicks(lo, hi, 5);
-    const yMin = yt[0], yMax = yt[yt.length - 1];
-    const X = i => M.l + (i - x0) / (x1 - x0) * (W - M.l - M.r);
-    const Y = val => M.t + (1 - (val - yMin) / (yMax - yMin)) * (H - M.t - M.b);
+    const pick = s => (isAnom ? s.series.anomaly : s.series.value);
+    const ends = s => [s.series.date[0], s.series.date[s.series.date.length - 1]];
+    const tEnds = s => [s.series.trend[0], s.series.trend[s.series.trend.length - 1]];
+    const kind = isAnom ? 'anomaly' : 'value';
+    const ov = state.overlays.filter(id => BY_ID[id] && BY_ID[id].variable === r.variable && id !== r.id);
+    const multi = ov.length > 0;
 
-    // break the line where months are missing
-    let d = '';
-    xs.forEach((xi, k) => { d += (k === 0 || xi - xs[k - 1] > 1 ? 'M' : 'L') + X(xi).toFixed(1) + ',' + Y(ys[k]).toFixed(1); });
+    const lines = [{ id: r.id, label: placeOf(r.id), color: COLORS.data, width: 1.7, dates: r.series.date, ys: pick(r), csvLabel: `${placeOf(r.id)} ${kind} (${v.unit})` }];
+    const trends = isAnom ? [{ id: 'trend:' + r.id, label: multi ? `Trend, ${placeOf(r.id)}` : 'Linear trend', color: COLORS.trend, dates: ends(r), y: tEnds(r) }] : [];
+    ov.forEach(id => {
+      const o = BY_ID[id], c = overlayColor(r.id, id);
+      lines.push({ id, label: placeOf(id), color: c, width: 1.4, dates: o.series.date, ys: pick(o), csvLabel: `${placeOf(id)} ${kind} (${v.unit})` });
+      if (isAnom) trends.push({ id: 'trend:' + id, label: `Trend, ${placeOf(id)}`, color: c, width: 2, dates: ends(o), y: tEnds(o) });
+    });
 
-    const y0 = Math.floor(x0 / 12), y1 = Math.floor(x1 / 12);
-    const yearStep = narrow ? 5 : 2;
-    let xTicks = '';
-    for (let y = Math.ceil(y0 / yearStep) * yearStep; y <= y1; y += yearStep) {
-      const px = X(y * 12);
-      if (px < M.l - 1) continue;
-      xTicks += `<line x1="${px}" x2="${px}" y1="${H - M.b}" y2="${H - M.b + 5}" stroke="#b9b9b0"/><text x="${px}" y="${H - M.b + 20}" text-anchor="middle">${y}</text>`;
-    }
-    const yTicks = yt.map(t => `<line x1="${M.l}" x2="${W - M.r}" y1="${Y(t)}" y2="${Y(t)}" stroke="#ecece6"/><text x="${M.l - 8}" y="${Y(t) + 4}" text-anchor="end">${TD.fmtNum(t, 3, isAnom)}</text>`).join('');
-
-    const trend = isAnom
-      ? `<line x1="${M.l}" x2="${W - M.r}" y1="${Y(0)}" y2="${Y(0)}" stroke="#9a9a92" stroke-width="1"/>
-         <path d="M${X(xs[0])},${Y(r.series.trend[0])}L${X(xs[xs.length - 1])},${Y(r.series.trend[r.series.trend.length - 1])}" stroke="#eb6834" stroke-width="2.5" stroke-dasharray="7 5" fill="none"/>`
-      : '';
-
+    const ys = pick(r), place = placeOf(r.id);
     const label = isAnom ? `Anomaly (${v.unit})` : `${v.short} (${v.unit})`;
-    const place = placeOf(r.id);
     const desc = isAnom
       ? `Line chart of monthly ${v.short.toLowerCase()} anomalies at ${place}, ${fmtMonth(r.start)} to ${fmtMonth(r.end)}, ranging from ${TD.fmtNum(Math.min(...ys), 3)} to ${TD.fmtNum(Math.max(...ys), 3)} ${v.unit}. Dashed trend line slopes ${r.slope_per_year > 0 ? 'upward' : 'downward'} at ${TD.fmtRate(r.slope_per_year, v.unit)}.`
       : `Line chart of monthly ${v.short.toLowerCase()} at ${place}, ${fmtMonth(r.start)} to ${fmtMonth(r.end)}, ranging from ${TD.fmtNum(Math.min(...ys), 4)} to ${TD.fmtNum(Math.max(...ys), 4)} ${v.unit}, showing the seasonal cycle.`;
 
-    box.innerHTML = `
-      <svg viewBox="0 0 ${W} ${H}" role="img" aria-labelledby="chart-t chart-d" tabindex="0">
-        <title id="chart-t">${esc(label)} at ${esc(place)}</title>
-        <desc id="chart-d">${esc(desc)} Use the left and right arrow keys to read individual months.</desc>
-        <g class="axis">${yTicks}${xTicks}
-          <text transform="translate(14 ${(H - M.b + M.t) / 2}) rotate(-90)" text-anchor="middle">${esc(label)}</text>
-        </g>
-        ${trend}
-        <path d="${d}" fill="none" stroke="#2a78d6" stroke-width="1.6" stroke-linejoin="round"/>
-        ${xs.map((xi, k) => ((k === 0 || xi - xs[k - 1] > 1) && (k === xs.length - 1 || xs[k + 1] - xi > 1))
-          ? `<circle cx="${X(xi).toFixed(1)}" cy="${Y(ys[k]).toFixed(1)}" r="2.2" fill="#2a78d6"/>` : '').join('')}
-        <g id="hover" style="display:none">
-          <line id="hx" y1="${M.t}" y2="${H - M.b}" stroke="#0f1420" stroke-opacity=".35"/>
-          <circle id="hc" r="5" fill="#2a78d6" stroke="#fff" stroke-width="2"/>
-        </g>
-        <rect x="${M.l}" y="${M.t}" width="${W - M.l - M.r}" height="${H - M.t - M.b}" fill="transparent" id="hit"/>
-      </svg>
-      <div class="tooltip" id="tip"></div>`;
+    chart.update({
+      lines, trends, zero: isAnom, symmetric: isAnom, signed: isAnom, unit: v.unit, yLabel: label,
+      title: `${label} at ${[place].concat(ov.map(placeOf)).join(', ')}`,
+      desc: desc + (multi ? ` Also shown: ${ov.map(placeOf).join(', ')}.` : ''),
+      csvName: `${r.id}_${kind}`,
+    }, { keepView });
 
-    $('#legend').innerHTML = isAnom
-      ? `<span><i></i>Monthly anomaly</span><span><i class="trend"></i>Linear trend</span><span><i class="zero"></i>Normal (0)</span>`
-      : `<span><i></i>Monthly value</span>`;
     $('#chart-caption').textContent = isAnom
-      ? `Each point is how far that month was above or below its usual value for that time of year. Values above zero mean higher than normal.${r.n_missing_fill > 0 ? ' Breaks in the line are months with no data.' : ''}`
-      : `Raw monthly values. The regular up-and-down pattern is the seasonal cycle, which is removed before testing for a trend.${r.n_missing_fill > 0 ? ' Breaks in the line are months with no data.' : ''}`;
-
-    const svg = box.querySelector('svg'), tip = $('#tip'), g = $('#hover', svg);
-    let cur = -1;
-    function show(k) {
-      if (k < 0 || k >= xs.length) return;
-      cur = k;
-      const px = X(xs[k]), py = Y(ys[k]);
-      g.style.display = '';
-      $('#hx', svg).setAttribute('x1', px); $('#hx', svg).setAttribute('x2', px);
-      $('#hc', svg).setAttribute('cx', px); $('#hc', svg).setAttribute('cy', py);
-      const rect = svg.getBoundingClientRect(), sc = rect.width / W;
-      tip.innerHTML = `<b>${fmtMonth(r.series.date[k])}</b><br>${isAnom ? 'Anomaly' : 'Value'}: ${TD.fmtNum(ys[k], 3, isAnom)} ${esc(v.unit)}`;
-      tip.style.left = Math.min(Math.max(px * sc, 70), rect.width - 70) + 'px';
-      tip.style.top = (py * sc) + 'px';
-      tip.style.opacity = 1;
-    }
-    function hide() { g.style.display = 'none'; tip.style.opacity = 0; }
-    function nearest(clientX) {
-      const rect = svg.getBoundingClientRect();
-      const mx = (clientX - rect.left) / rect.width * W;
-      const target = x0 + (mx - M.l) / (W - M.l - M.r) * (x1 - x0);
-      let best = 0, bd = Infinity;
-      xs.forEach((xi, k) => { const dd = Math.abs(xi - target); if (dd < bd) { bd = dd; best = k; } });
-      return best;
-    }
-    svg.addEventListener('pointermove', e => show(nearest(e.clientX)));
-    svg.addEventListener('pointerleave', hide);
-    svg.addEventListener('blur', hide);
-    svg.addEventListener('keydown', e => {
-      if (e.key === 'ArrowRight' || e.key === 'ArrowLeft') {
-        e.preventDefault();
-        show(cur < 0 ? (e.key === 'ArrowRight' ? 0 : xs.length - 1) : cur + (e.key === 'ArrowRight' ? 1 : -1));
-      } else if (e.key === 'Home') { e.preventDefault(); show(0); }
-      else if (e.key === 'End') { e.preventDefault(); show(xs.length - 1); }
-    });
+      ? `Each point is how far that month was above or below its usual value for that time of year. Above zero means higher than normal.${r.n_missing_fill > 0 ? ' Shaded bands are months with no data.' : ''}`
+      : `Raw monthly values. The regular up-and-down pattern is the seasonal cycle, which is removed before testing for a trend.${r.n_missing_fill > 0 ? ' Shaded bands are months with no data.' : ''}`;
   }
-
-  let rt; window.addEventListener('resize', () => { clearTimeout(rt); rt = setTimeout(() => { if (state.series) drawChart(BY_ID[state.series], CONTENT.variables[BY_ID[state.series].variable]); }, 150); });
 })();
