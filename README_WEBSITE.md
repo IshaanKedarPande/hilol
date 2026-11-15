@@ -1,4 +1,6 @@
-# Earth System Trend Detective: website
+# Earthpulse: website
+
+Built by team Hilol for the 2026 NASA Space Apps Challenge "Be an Earth System Trend Detective!".
 
 A static website (plain HTML, CSS and JavaScript, no framework and no build step) that presents the analysis in `final.py`.
 
